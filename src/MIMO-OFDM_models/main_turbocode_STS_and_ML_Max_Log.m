@@ -1,0 +1,424 @@
+clear all; close all; clc
+%pkg load communications
+
+%% parameters
+rng(5); % random seed setter (for repeating the same results)
+
+% create result directory
+time_stamp_str = char(datetime('now'));
+for i = 1:strlength(time_stamp_str)
+    if (time_stamp_str(i) == '-' || time_stamp_str(i) == ':')
+        time_stamp_str(i) = '.'; 
+    end
+end
+
+short_params_str = "_STS_&_MLml";
+folder = "results";
+directory_for_results = folder + "\" + time_stamp_str + short_params_str; 
+
+if ~exist(folder, "dir"), mkdir(folder); end
+mkdir(directory_for_results);
+
+% modulation params
+M = 16; 
+N_bits_in_mod = log2(M);
+Nt = 2; Nr = 2;
+
+
+% turbocode params
+L = 512;
+trellis = poly2trellis(4, [13 15], 13);
+numiter = 1;
+n = log2(trellis.numOutputSymbols);
+numTails = log2(trellis.numStates) * n;
+M_tc = L * (2*n - 1) + 2 * numTails;
+rate = L / M_tc;
+QPP_interliver_permut = get_QPP_interleaver_permutation(L);
+turboenc = comm.TurboEncoder(trellis, QPP_interliver_permut);
+turbodec = comm.TurboDecoder(trellis, QPP_interliver_permut, numiter);
+
+count_coded_bits_for_frame = Nt * M_tc * N_bits_in_mod;
+count_decoded_bits_for_frame = Nt * L * N_bits_in_mod;
+count_do_turbocode_for_frame = Nt * N_bits_in_mod;
+
+
+
+% values from IEEE LTE 30.72 MHz band
+Bw = 30.72e6; % Hz -- Bandwidth
+delta_f = 15e3;
+N_FFT = 2048; %int(Bw/delta_f);
+N_used = M_tc;
+Ts = 1/(delta_f); 
+delta_t = 1/Bw; 
+guard_bands = get_guard_band_samples(N_FFT, N_used);
+[N_used_start.start, N_used_start.end] = get_num_of_start_used_carrier(N_FFT, N_used);
+[N_used_end.start, N_used_end.end] = get_num_of_end_used_carrier(N_FFT, N_used);
+
+cp_length = 160; %idivide(time_cp, delta_t);
+
+N = N_FFT + cp_length;
+
+numb_frames = 3;
+STEPS = 0:8;
+STEP_sz = 2;
+START_SNR = 7;
+SNRs = START_SNR + STEPS*STEP_sz;
+
+
+% channel params
+path_delay = [1  30 70 90 110 190 410];
+path_gain_db = [0 -1 -2 -3 -8 -17.2 -20.8];
+
+% constant channel for each frame
+h = get_MIMO_Rayleigh_channel(path_delay, path_gain_db, Nr, Nt);
+% max_t = 1; %max(path_delay);
+% % Rtx = [1 0; 0 1];
+% % Rrx = [1 0; 0 1];% 
+% % Rtx = [1 0.3; 0.3 1];
+% % Rrx = [1 0.3; 0.3 1];
+% 
+% % Rtx = [1 0.9; 0.9 1];
+% % Rrx = [1 0.9; 0.9 1];
+%  
+%  
+% Rtx = [1 0.2; 0.2 1];
+% Rrx = [1 0.2; 0.2 1];
+%  
+% % Rtx = [1 0.5; 0.5 1];
+% % Rrx = [1 0.5; 0.5 1];
+% 
+%  
+% % Rtx = [1 0.9; 0.9 1];
+% % Rrx = [1 0.9; 0.9 1];
+%  
+% % Rtx = [1 0.7; 0.7 1];
+% % Rrx = [1 0.2; 0.2 1];
+% 
+% h = get_MIMO_Rayleigh_channel_by_correlation_matrix(Nt, Nr, max_t,Rtx, Rrx, 'complex');
+
+Plotting_and_save_MIMO_Channel_matrix(h, "channel_matrix_maxt1_R1_09_complex", directory_for_results);
+
+
+
+Evm_ZF = [];
+Evm_MMSE = [];
+
+Ber_ZF = [];
+Ber_MMSE = [];
+Ber_ML_Max_Log = [];
+Ber_STS = [];
+
+time_ZF = [];
+time_MMSE = [];
+time_ML_Max_Log = [];
+time_STS = [];
+
+clips_STS = [];
+
+
+for CUR_STEP = STEPS
+
+SNR_dB = START_SNR + CUR_STEP*STEP_sz;
+
+Output_signals = [];
+Decode_signals_ZF = [];
+Decode_signals_MMSE = [];
+
+Decode_Data_ZF = [];
+Decode_Data_MMSE = [];
+Decode_Data_ML_Max_Log = [];
+Decode_Data_STS = [];
+info_bits_out = [];
+
+cur_time_ZF = [];
+cur_time_MMSE = [];
+cur_time_ML_Max_Log = [];
+cur_time_STS = [];
+
+cur_clips_STS = [];
+
+for num_frame = 1:numb_frames
+
+%% Generate Messsage bits like packeges
+[cur_info_bits_out, info_numb_bits] = Generate_sequence_of_bits(count_decoded_bits_for_frame);
+
+
+%% Coded by turbocode
+coded_bits = ones(count_coded_bits_for_frame, 1)*-1;
+
+for step = 1:count_do_turbocode_for_frame
+    coded_bits(1 + (step-1)*M_tc : step*M_tc) = ...
+        turboenc(cur_info_bits_out(1 + (step-1)*L : step*L));
+end
+
+
+%% Mapping
+FFT_coefs_for_messages = qammod(coded_bits, M, 'InputType','bit');
+FFT_coefs_for_messages = FFT_coefs_for_messages(:).'; 
+
+
+%% Serial to paralel for antennas
+FFT_coefs_for_message_antennas = reshape(FFT_coefs_for_messages, Nt, []);
+FFT_pilot_coefs_for_message_antennas = get_pilot_coefs(Nt, Nr, N_used);
+
+Output_signals = [Output_signals FFT_coefs_for_message_antennas];
+
+
+%% Time coefs
+info_frame_tx_fd = zeros(Nt, N_FFT);
+info_frame_tx_td = zeros(Nt, N_FFT);
+
+
+for i = 1:Nt
+    info_frame_fd_i = zeros(1, N_FFT);
+    info_frame_fd_i([N_used_start.start:N_used_start.end N_used_end.start:N_used_end.end]) = ...
+        FFT_coefs_for_message_antennas(i, :);
+    info_frame_tx_fd(i, :) = info_frame_fd_i;
+    info_frame_tx_td(i, :) = ifft(info_frame_fd_i).*sqrt(N_FFT);
+end
+
+
+%% Add cyclic prefix
+info_frame_out = zeros(Nt, N_FFT + cp_length);
+
+for i = 1:Nt
+    info_frame_out(i, :) = add_cyclic_prefix(info_frame_tx_td(i, :), cp_length);
+end
+
+
+%% Channel fading and Antennas interfernce
+
+% Convolution
+info_frame_conv = MIMO_convolution(info_frame_out, h, N_FFT, cp_length);
+
+
+%% Add the AWGN (block "AWGN")
+[info_frame_out_channel, nVar_info] = ADD_AWGN_MIMO(info_frame_conv, SNR_dB);
+
+
+%% Remove cyclic prefix
+info_frame_out_channel_without_cp = zeros(Nr, N_FFT);
+
+for i = 1:Nr
+    info_frame_out_channel_without_cp(i, :) = ...
+        remove_cyclic_prefix(info_frame_out_channel(i, :), cp_length);
+end
+
+
+%% FFT
+info_frame_rx_fd = zeros(Nr, N_FFT);
+
+for i = 1:Nr
+    info_frame_rx_fd(i, :) = fft(info_frame_out_channel_without_cp(i, :))./sqrt(N_FFT);
+end
+
+
+%% Find channel matrix
+H_fd_fft = get_channel_matrix_by_fft(h, N_FFT);
+
+
+%% Equalizers by channel matrix
+
+% Zero-Forcing
+cur_time = 0;
+LLR_ZF = [];
+for id_fd = N_used_start.start:N_used_start.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    equalize_symb_id = use_ZF_equalizer(info_frame_rx_fd(:, id_fd), H, Nt);
+    llr_id = qamdemod(equalize_symb_id, M, OutputType="llr");
+    cur_time = cur_time + toc;
+    Decode_signals_ZF = [Decode_signals_ZF equalize_symb_id];
+    LLR_ZF = [LLR_ZF llr_id(:).'];    
+end
+for id_fd = N_used_end.start:N_used_end.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    equalize_symb_id = use_ZF_equalizer(info_frame_rx_fd(:, id_fd), H, Nt);
+    llr_id = qamdemod(equalize_symb_id, M, OutputType="llr");
+    cur_time = cur_time + toc;
+    Decode_signals_ZF = [Decode_signals_ZF equalize_symb_id];
+    LLR_ZF = [LLR_ZF llr_id(:).'];    
+end
+
+cur_time_ZF = [cur_time_ZF cur_time];
+
+
+% MMSE
+cur_time = 0;
+LLR_MMSE = [];
+for id_fd = N_used_start.start:N_used_start.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    equalize_symb_id = use_MMSE_equalizer(info_frame_rx_fd(:, id_fd), H, Nr, Nt, SNR_dB, 0);
+    llr_id = qamdemod(equalize_symb_id, M, OutputType="llr");
+    cur_time = cur_time + toc;
+    Decode_signals_MMSE = [Decode_signals_MMSE equalize_symb_id];
+    LLR_MMSE = [LLR_MMSE llr_id(:).'];    
+end
+for id_fd = N_used_end.start:N_used_end.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    equalize_symb_id = use_MMSE_equalizer(info_frame_rx_fd(:, id_fd), H, Nr, Nt, SNR_dB, 0);
+    llr_id = qamdemod(equalize_symb_id, M, OutputType="llr");
+    cur_time = cur_time + toc;
+    Decode_signals_MMSE = [Decode_signals_MMSE equalize_symb_id];
+    LLR_MMSE = [LLR_MMSE llr_id(:).'];    
+end
+
+cur_time_MMSE = [cur_time_MMSE cur_time];
+
+
+%% Equalizers ML algorithms
+% ML
+cur_time = 0;
+LLR_ML_Max_Log = [];
+for id_fd = N_used_start.start:N_used_start.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    [llr_id, ~, ~] = Solve_LLR_ML_Max_Log(info_frame_rx_fd(:, id_fd), M, H, nVar_info, @qammod);
+    cur_time = cur_time + toc;
+    LLR_ML_Max_Log = [LLR_ML_Max_Log llr_id(:).'];    
+end
+for id_fd = N_used_end.start:N_used_end.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    [llr_id, ~, ~] = Solve_LLR_ML_Max_Log(info_frame_rx_fd(:, id_fd), M, H, nVar_info, @qammod);
+    cur_time = cur_time + toc;
+    LLR_ML_Max_Log = [LLR_ML_Max_Log llr_id(:).'];    
+end
+
+cur_time_ML_Max_Log = [cur_time_ML_Max_Log cur_time];
+
+
+%% Equalizers MAP algorithms
+% STS
+cur_time = 0;
+cur_clips = 0;
+LLR_STS = [];
+for id_fd = N_used_start.start:N_used_start.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    [llr_id, clips_id] = Solve_LLR_STS_algo2(info_frame_rx_fd(:, id_fd), M, H, nVar_info, @qammod);
+    cur_time = cur_time + toc;
+    cur_clips = cur_clips + clips_id;
+    LLR_STS = [LLR_STS llr_id(:).'];    
+end
+
+for id_fd = N_used_end.start:N_used_end.end
+    H = H_fd_fft(:, :, id_fd);
+    tic;
+    [llr_id, clips_id] = Solve_LLR_STS_algo2(info_frame_rx_fd(:, id_fd), M, H, nVar_info, @qammod);
+    cur_time = cur_time + toc;
+    cur_clips = cur_clips + clips_id;
+    LLR_STS = [LLR_STS llr_id(:).'];    
+end
+
+cur_time_STS = [cur_time_STS cur_time];
+cur_clips_STS = [cur_clips_STS cur_clips];
+
+
+%% Turbo-decode message
+cur_Decode_Data_ZF = ones(count_decoded_bits_for_frame, 1)*-100;
+cur_Decode_Data_MMSE = ones(count_decoded_bits_for_frame, 1)*-100;
+cur_Decode_Data_ML_Max_Log = ones(count_decoded_bits_for_frame, 1)*-100;
+cur_Decode_Data_STS = ones(count_decoded_bits_for_frame, 1)*-100;
+
+for step = 1:count_do_turbocode_for_frame
+    cur_Decode_Data_ZF(1 + (step-1)*L : step*L) = ...
+        turbodec(-LLR_ZF(1 + (step-1)*M_tc : step*M_tc));
+    cur_Decode_Data_MMSE(1 + (step-1)*L : step*L) = ...
+        turbodec(-LLR_MMSE(1 + (step-1)*M_tc : step*M_tc));
+    cur_Decode_Data_ML_Max_Log(1 + (step-1)*L : step*L) = ...
+        turbodec(-LLR_ML_Max_Log(1 + (step-1)*M_tc : step*M_tc));
+    cur_Decode_Data_STS(1 + (step-1)*L : step*L) = ...
+        turbodec(-LLR_STS(1 + (step-1)*M_tc : step*M_tc));
+end
+
+
+%% Write results
+Decode_Data_ZF = [Decode_Data_ZF cur_Decode_Data_ZF.'];
+Decode_Data_MMSE = [Decode_Data_MMSE cur_Decode_Data_MMSE.'];
+Decode_Data_ML_Max_Log = [Decode_Data_ML_Max_Log cur_Decode_Data_ML_Max_Log.'];
+Decode_Data_STS = [Decode_Data_STS cur_Decode_Data_STS.'];
+info_bits_out = [info_bits_out cur_info_bits_out.'];
+
+
+
+%% Calculate awerage signal power
+avg_signal_tx_fd_power = get_signal_power(info_frame_tx_fd);
+avg_signal_rx_fd_power = get_signal_power(info_frame_rx_fd);
+
+avg_signal_tx_td_power = get_signal_power(info_frame_tx_td);
+avg_signal_rx_td_power = get_signal_power(info_frame_out_channel_without_cp);
+
+disp("snr="+ string(SNR_dB)+"  num_frame="+string(num_frame));
+disp("avg_pow_tx_fd=" + string(avg_signal_tx_fd_power) + "  avg_pow_rx_fd=" + string(avg_signal_rx_fd_power));
+disp("avg_pow_tx_td=" + string(avg_signal_tx_td_power) + "  avg_pow_rx_td=" + string(avg_signal_rx_td_power));
+end
+
+
+%% Calculate metrics
+[~, ber_ZF] = biterr(info_bits_out(:), Decode_Data_ZF(:));
+[~, ber_MMSE] = biterr(info_bits_out(:), Decode_Data_MMSE(:));
+[~, cur_ber_ML_Max_Log] = biterr(info_bits_out(:), Decode_Data_ML_Max_Log(:));
+[~, cur_ber_STS] = biterr(info_bits_out(:), Decode_Data_STS(:));
+
+evm_ZF = Compute_MSE(Output_signals, Decode_signals_ZF);
+evm_MMSE = Compute_MSE(Output_signals, Decode_signals_MMSE);
+
+
+%% Write results
+Ber_ZF = [Ber_ZF ber_ZF];
+Ber_MMSE = [Ber_MMSE ber_MMSE];
+Ber_ML_Max_Log = [Ber_ML_Max_Log cur_ber_ML_Max_Log];
+Ber_STS = [Ber_STS cur_ber_STS];
+
+Evm_ZF = [Evm_ZF evm_ZF];
+Evm_MMSE = [Evm_MMSE evm_MMSE];
+
+time_ZF = [time_ZF sum(cur_time_ZF)];
+time_MMSE = [time_MMSE sum(cur_time_MMSE)];
+time_ML_Max_Log = [time_ML_Max_Log sum(cur_time_ML_Max_Log)];
+time_STS = [time_STS sum(cur_time_STS)];
+
+clips_STS = [clips_STS sum(cur_clips_STS)];
+
+
+%% Plotting Constellations
+Plotting_and_save_constellations(FFT_coefs_for_messages, FFT_coefs_for_messages, info_frame_rx_fd, ...
+    Decode_signals_ZF, SNR_dB, 0, 0, 1, "ZF", directory_for_results);
+
+Plotting_and_save_constellations(FFT_coefs_for_messages, FFT_coefs_for_messages, info_frame_rx_fd, ...
+    Decode_signals_MMSE, SNR_dB, 0, 0, 1, "MMSE", directory_for_results);
+
+
+disp(SNR_dB)
+end
+
+
+%% Plotting results
+ber_names = ["ZF", "MMSE", "ML  Max-Log", "STS"];
+evm_names = ["ZF", "MMSE"];
+time_names = ["ZF", "MMSE", "ML Max-Log", "STS"];
+clip_names = ["STS"];
+
+
+% replase zeros ber
+[SNR_ZF, Ber_ZF] = Replace_Zeros(SNRs, Ber_ZF);
+[SNR_MMSE, Ber_MMSE] = Replace_Zeros(SNRs, Ber_MMSE);
+[SNR_ML_Max_Log, Ber_ML_Max_Log] = Replace_Zeros(SNRs, Ber_ML_Max_Log);
+[SNR_STS, Ber_STS] = Replace_Zeros(SNRs, Ber_STS);
+ 
+
+% plotting ber
+Plotting_multiple({SNR_ZF, SNR_MMSE, SNR_ML_Max_Log, SNR_STS}, {Ber_ZF, Ber_MMSE, Ber_ML_Max_Log, Ber_STS}, ber_names, "SNR dB", "BER", "Ber compare", 1, directory_for_results);
+
+% plotting evm
+Plotting_multiple({SNRs; SNRs}, {Evm_ZF; Evm_MMSE}, evm_names, "SNR", "EVM", "Evm compare", 1, directory_for_results);
+
+% plotting execution time curves
+Plotting_multiple({SNRs, SNRs, SNRs, SNRs}, {time_ZF, time_MMSE, time_ML_Max_Log, time_STS}, time_names, "SNR dB", "time sec", "Time compare", 1, directory_for_results);
+
+% plotting curves of numb clips
+Plotting_multiple({SNRs}, {clips_STS}, clip_names, "SNR dB", "numb clips", "Clip compare", 1, directory_for_results);
