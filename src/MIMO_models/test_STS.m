@@ -56,15 +56,10 @@ info_symbols_antenna_interference = h*Mod_symbols;
 
 %% Solve LLR
 tic;
-%[LLR_STS_algo] = Solve_LLR_STS_algo(info_symbols_out_channel, M, H, nVar);
 disp("STS_algo: " + string(toc) + " Snr: " + string(SNR_dB));
 
 tic;
-% profile on;
-[LLR_STS] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod);
-% profile off
-% p = profile('info');
-% profile viewer;
+[LLR_STS] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod, 'opt');
 disp("STS: " + string(toc) + " Snr: " + string(SNR_dB));
 
 
@@ -97,7 +92,7 @@ end
 
 
 % Plotting_multiple({SNR_STS_algo, SNR_STS}, {Ber_STS_algo, Ber_STS}, result_names, "SNR dB", "BER", "result", 1);
-Plotting_multiple({SNR_STS}, {Ber_STS}, result_names, "SNR dB", "BER", "result", 1);
+Plotting_multiple({SNR_STS}, {Ber_STS}, result_names, "SNR dB", "BER", "result", 1, directory_for_results);
 
 
 

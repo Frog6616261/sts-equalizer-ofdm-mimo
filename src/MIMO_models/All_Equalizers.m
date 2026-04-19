@@ -37,9 +37,7 @@ clips_STS = [];
 
 profile on;
 
-for CUR_STEP = STEPS
-
-SNR_dB = START_SNR + CUR_STEP*STEP_sz;
+for SNR_dB = SNRs
 
 %% Generate Messsage and References simbols
 enc = comm.ConvolutionalEncoder(trellis);
@@ -69,20 +67,20 @@ time_ZF = [time_ZF toc];
 
 % MMSE
 tic;
-info_symbols_equalized_MMSE = reshape(use_my_MMSE_equalizer(info_symbols_out_channel, H, Nr, Nt, SNR_dB, 0), [], 1);
+info_symbols_equalized_MMSE = reshape(use_MMSE_equalizer(info_symbols_out_channel, H, Nr, Nt, SNR_dB, 0), [], 1);
 LLR_MMSE = qamdemod(info_symbols_equalized_MMSE, M, OutputType="llr");
 time_MMSE = [time_MMSE toc];
 
 
 %% Equalizers ML algorithms
 tic;
-[LLR_ML, ~] = Solve_LLR_ML(info_symbols_out_channel, M, H, nVar);
+LLR_ML = Solve_LLR_ML(info_symbols_out_channel, M, H, nVar, @qammod, 'sum-exp');
 time_ML = [time_ML toc];
 
 
 %% Equalizers MAP algorithms
 tic;
-[LLR_STS, numb_clips_STS] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod);
+[LLR_STS, numb_clips_STS] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod, 'opt');
 time_STS = [time_STS toc];
 
 clips_STS = [clips_STS numb_clips_STS];
