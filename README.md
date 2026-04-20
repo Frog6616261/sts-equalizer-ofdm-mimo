@@ -1,4 +1,4 @@
-# sts-equalizer-ofdm-mimo
+# equalizers-ofdm-mimo
 
 ## Overview
 
