@@ -22,6 +22,9 @@ switch type_func
     case 'opt'
         [LLRs, numb_clipping, ~, ~] = Solve_LLR_STS_opt(sym_rx, M, H, nVar, mod_func);
 
+    case 'puring'
+        [LLRs, numb_clipping, ~, ~] = Solve_LLR_STS_puring(sym_rx, M, H, nVar, mod_func);
+
     otherwise
         error('There are not function like ' + string(type_func));
 end

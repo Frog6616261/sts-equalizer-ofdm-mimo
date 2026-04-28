@@ -88,7 +88,6 @@ max_lambda(1) = 0;
             % Current distance musn't bemorre tren current bourder
             max_a = max(max_lambda(level), max_a_after);            
 
-%             for i = (bits_in_mod * (Nt - level) + 1):bits_in_mod * (Nt - level + 1)
             for i = start_end_arrs(level, :)
                 if (bitxor(bitand(main_bits, uni_bits_arr(i)), bitand(cur_num, uni_bits_arr(i))) ~= 0)
                     max_a_after = max(max_a_after, lambda_jb(i));
