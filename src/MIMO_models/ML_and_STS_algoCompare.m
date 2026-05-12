@@ -70,7 +70,7 @@ LLR_ML_algo = Solve_LLR_ML(info_symbols_out_channel, M, H, nVar, @qammod, 'algo'
 time_ML_algo = [time_ML_algo toc];
 
 tic;
-[LLR_STS_algo, cur_numb_clips_STS_algo] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod, 'algo');
+[LLR_STS_algo, cur_numb_clips_STS_algo] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod, 'puring');
 time_STS_algo = [time_STS_algo toc];
 
 clips_STS_algo = [clips_STS_algo cur_numb_clips_STS_algo];
@@ -122,9 +122,9 @@ directory_for_results = folder + "\" + time_stamp_str;
 if ~exist(folder, "dir"), mkdir(folder); end
 mkdir(directory_for_results);
 
-result_names = ["BER ML algo", "BER STS opt"];
-time_names = ["time ML algo", "time STS opt"];
-clip_names = ["clips STS opt"];
+result_names = ["BER ML algo", "BER STS puring"];
+time_names = ["time ML algo", "time STS puring"];
+clip_names = ["clips STS puring"];
 
 % Plotting BER
 Plotting_multiple({SNR_ML_algo, SNR_STS_algo}, {Ber_ML_algo, Ber_STS_algo}, result_names, "SNR dB", "BER", "result", 1, directory_for_results);
