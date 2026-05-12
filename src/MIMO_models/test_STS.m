@@ -14,7 +14,7 @@ opmode ='soft';
 
 
 M = 16; % e.g. 2, 4, 8 -> PSK; 16, 64... -> QAM
-numb_messages = 500;
+numb_messages = 100;
 Nt = 3; Nr = 3;
 STEPS = 0:6;
 STEP = 2;
@@ -24,14 +24,17 @@ SNRS = START_SNR + STEPS*STEP;
 
 Ber_STS_basic = [];
 Ber_STS_puring = [];
+Ber_STS_purback = [];
 Ber_STS_opt = [];
 
 Time_STS_basic = [];
 Time_STS_puring = [];
+Time_STS_purback = [];
 Time_STS_opt = [];
 
 Clips_STS_basic = [];
 Clips_STS_puring = [];
+Clips_STS_purback = [];
 Clips_STS_opt = [];
 
 for SNR_dB = SNRS
@@ -69,9 +72,14 @@ Time_STS_puring = [Time_STS_puring toc];
 Clips_STS_puring = [Clips_STS_puring cur_clips_STS_puring];
 
 tic;
-[LLR_STS_opt, cur_clips_STS_opt] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod, 'opt');
-Time_STS_opt = [Time_STS_opt toc];
-Clips_STS_opt = [Clips_STS_opt cur_clips_STS_opt];
+[LLR_STS_purback, cur_clips_STS_purback] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod, 'purback');
+Time_STS_purback = [Time_STS_purback toc];
+Clips_STS_purback = [Clips_STS_purback cur_clips_STS_purback];
+
+% tic;
+% [LLR_STS_opt, cur_clips_STS_opt] = Solve_LLR_STS(info_symbols_out_channel, M, H, nVar, @qammod, 'opt');
+% Time_STS_opt = [Time_STS_opt toc];
+% Clips_STS_opt = [Clips_STS_opt cur_clips_STS_opt];
 
 
 %% Viterbi-Decode message
@@ -81,19 +89,22 @@ vitDecUNQUANT = comm.ViterbiDecoder(trellis, ...
 
 Decode_Data_STS_basic = vitDecUNQUANT(LLR_STS_basic);
 Decode_Data_STS_puring = vitDecUNQUANT(LLR_STS_puring);
-Decode_Data_STS_opt = vitDecUNQUANT(LLR_STS_opt);
+Decode_Data_STS_purback = vitDecUNQUANT(LLR_STS_purback);
+% Decode_Data_STS_opt = vitDecUNQUANT(LLR_STS_opt);
 
 
 %% Calculate metrics
 [~, cur_ber_STS_basic] = biterr(bits_out(:), Decode_Data_STS_basic(:));
 [~, cur_ber_STS_puring] = biterr(bits_out(:), Decode_Data_STS_puring(:));
-[~, cur_ber_STS_opt] = biterr(bits_out(:), Decode_Data_STS_opt(:));
+[~, cur_ber_STS_purback] = biterr(bits_out(:), Decode_Data_STS_purback(:));
+% [~, cur_ber_STS_opt] = biterr(bits_out(:), Decode_Data_STS_opt(:));
 
 
 %% Write results
 Ber_STS_basic = [Ber_STS_basic cur_ber_STS_basic];
 Ber_STS_puring = [Ber_STS_puring cur_ber_STS_puring];
-Ber_STS_opt = [Ber_STS_opt cur_ber_STS_opt];
+Ber_STS_purback = [Ber_STS_purback cur_ber_STS_purback];
+% Ber_STS_opt = [Ber_STS_opt cur_ber_STS_opt];
 
 disp(SNR_dB)
 end
@@ -102,7 +113,8 @@ end
 %% Plotting results
 [SNR_STS_basic, Ber_STS_basic] = Replace_Zeros(SNRS, Ber_STS_basic);
 [SNR_STS_puring, Ber_STS_puring] = Replace_Zeros(SNRS, Ber_STS_puring);
-[SNR_STS_opt, Ber_STS_opt] = Replace_Zeros(SNRS, Ber_STS_opt);
+[SNR_STS_purback, Ber_STS_purback] = Replace_Zeros(SNRS, Ber_STS_purback);
+% [SNR_STS_opt, Ber_STS_opt] = Replace_Zeros(SNRS, Ber_STS_opt);
 
 
 % create result directory
@@ -119,24 +131,24 @@ directory_for_results = folder + "\" + time_stamp_str;
 if ~exist(folder, "dir"), mkdir(folder); end
 mkdir(directory_for_results);
 
-result_names = ["basic", "puring", "opt"];
+result_names = ["basic", "puring", "purback"];
 
 
 % Plotting_multiple({SNR_STS_algo, SNR_STS}, {Ber_STS_algo, Ber_STS}, result_names, "SNR dB", "BER", "result", 1);
-Plotting_multiple({SNR_STS_basic, SNR_STS_puring, SNR_STS_opt}, ...
-    {Ber_STS_basic, Ber_STS_puring, Ber_STS_opt}, ...
+Plotting_multiple({SNR_STS_basic, SNR_STS_puring, SNR_STS_purback}, ...
+    {Ber_STS_basic, Ber_STS_puring, Ber_STS_purback}, ...
     result_names, "SNR dB", "BER", "result", 1, directory_for_results);
 
 
 % Plotting execution time curves
 Plotting_multiple({SNRS, SNRS, SNRS}, ...
-    {Time_STS_basic, Time_STS_puring, Time_STS_opt}, ...
+    {Time_STS_basic, Time_STS_puring, Time_STS_purback}, ...
     result_names, "SNR dB", "time sec", "Time compare", 1, directory_for_results);
 
 
 % Plotting curvesof numb clips
 Plotting_multiple({SNRS, SNRS, SNRS}, ...
-    {Clips_STS_basic, Clips_STS_puring, Clips_STS_opt}, ...
+    {Clips_STS_basic, Clips_STS_puring, Clips_STS_purback}, ...
     result_names, "SNR dB", "numb clips", "Clip compare", 1, directory_for_results);
 
 

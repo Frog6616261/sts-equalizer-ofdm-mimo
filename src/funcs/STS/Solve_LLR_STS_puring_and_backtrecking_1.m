@@ -1,6 +1,5 @@
-function [LLRs, numb_clipping, lambda_jb, lambda_g] = Solve_LLR_STS_puring(sym_rx, M, H, nVar, mod_func)
-%function [LLRs, exponents]= Calculate_LLR_RTS_Full(sym_rx, M, H, nVar)
-% realisation with puring
+function [LLRs, numb_clipping, lambda_jb, lambda_g] = Solve_LLR_STS_puring_and_backtrecking_1(sym_rx, M, H, nVar, mod_func)
+% realisation with puring and backtrecking
 %Inputs:
 %   sym_rx [Tr x count_messages] messages
 %   M [QAM] symbols
@@ -29,8 +28,8 @@ LLr_pos_by_lambda_pos = bits_in_mes:-1:1;
 Q_H = Q';
 
 % all symbols
-[TREE_LVL, SYMB_TREE_LVL] = buildMTreeLevels_v2(M, Nt, mod_symbols);
-NUMBS = mAryVectorsToNumbers(TREE_LVL, M);
+[NUMBS_TREE_LVL, SYMB_TREE_LVL] = buildMTreeLevels_v2(M, Nt, mod_symbols);
+NUMS = mAryVectorsToNumbers(NUMBS_TREE_LVL, M);
 
 
 % for max_a start end arrays
@@ -46,59 +45,110 @@ sym_rx_r = Q_H * sym_rx(:, num_mes+1);
 lambda_jb = inf(1, bits_in_mes);
 lambda_g = inf;
 main_bits = max_var;
-max_lambda = inf(1, Nt);
-max_lambda(1) = 0;
+max_lambda = zeros(1, Nt); %inf(1, Nt);
 cur_num = 1;
+last_num = 1;
+cur_weights = zeros(1, Nt+1);
+min_lvl_of_weight = Nt;
+
+is_full_leaf_was = false;
+max_a = zeros(1, Nt+1);
+max_a_after = zeros(1, Nt+1); % that lambda we can chanched, because we know bits
 
     %% Find, enumerations of signals
     while (cur_num ~= (power(M, Nt) + 1))
-        d_i = 0; 
-        max_a = 0;
-        max_a_after = 0; % that lambda we can chanched, because we know bits
-
         is_list_break = false;
 
-        %go search
-        cur_numb = NUMBS(cur_num);
+        % backtrecking
+        % find start level
+        lvl = Nt;
+        while (lvl > min_lvl_of_weight)
+            if (NUMBS_TREE_LVL(lvl, last_num) ~= NUMBS_TREE_LVL(lvl, cur_num))
+                break;
+            end
+
+            lvl = lvl - 1;
+        end
+
+        % set current params
+        cur_numb = NUMS(cur_num);
         cur_symb = SYMB_TREE_LVL(:, cur_num);
 
-        for level = levels
+        % re-update max_a
+        if (is_full_leaf_was)  
+            level = Nt;
+            while (level > lvl)
+                max_a(level) = max(max_lambda(level), max_a_after(level+1));  
+                
+                % find max metric for current level that we can use
+                for i = start_end_arrs(level, :)
+                    if (bitxor(bitand(main_bits, uni_bits_arr(i)), bitand(cur_numb, uni_bits_arr(i))) ~= 0)             
+                        if (max_a_after(level) == Inf)
+                            max_a_after(level) = lambda_jb(i);
+                        else
+                            max_a_after(level) = max(max_a_after(level), lambda_jb(i));
+                        end
+                    end
+                end  
+    
+                max_a(level) = max(max_a(level), max_a_after(level));  
+                level = level - 1;
+            end
+            
+            is_full_leaf_was = false;
+        end
+
+        % go search 
+        while (lvl >= 1)
 %             %find current symb         
 %             cur_bits_symb = rem(cur_numb, M);
 %             cur_numb = floor(cur_numb / M);
 
             %find layer distanse
-            e_i = sym_rx_r(level); % out signal component
-            for symb_num = Nt:-1:level
-                e_i = e_i - R(level, symb_num)*cur_symb(symb_num);                
+            e_i = sym_rx_r(lvl); % out signal component
+            for symb_num = Nt:-1:lvl
+                e_i = e_i - R(lvl, symb_num)*cur_symb(symb_num);                
             end
 
-            d_i = d_i + norm(e_i)^2;
+            cur_weights(lvl) = cur_weights(lvl+1) + norm(e_i)^2;
 
             % update max_a
-            max_a = max(max_lambda(level), max_a_after);            
-            
+            max_a(lvl) = max(max_lambda(lvl), max_a_after(lvl+1));  
+
             % find max metric for current level that we can use
-            for i = start_end_arrs(level, :)
+            for i = start_end_arrs(lvl, :)
                 if (bitxor(bitand(main_bits, uni_bits_arr(i)), bitand(cur_numb, uni_bits_arr(i))) ~= 0)
-                    max_a_after = max(max_a_after, lambda_jb(i));
+                    if (max_a_after(lvl) == Inf)
+                        max_a_after(lvl) = lambda_jb(i);
+                    else
+                        max_a_after(lvl) = max(max_a_after(lvl), lambda_jb(i));
+                    end
                 end
             end  
 
-            max_a = max(max_a, max_a_after);
+            max_a(lvl) = max(max_a(lvl), max_a_after(lvl));
 
-            % do check for distance and puring
-            if (d_i > max_a)
+            % do check for distance and puring and backtrecking
+            if (cur_weights(lvl) > max_a(lvl))
 
                 % count clipping
-                cur_shift = power(M, (level - 1));
+                cur_shift = power(M, (lvl - 1));
                 numb_clipping = numb_clipping + cur_shift;
+
+                % set last and cur 
+                % numers
+                last_num = cur_num;
                 cur_num = cur_num + cur_shift;
+
+                % set level for end search
+                min_lvl_of_weight = lvl;
 
                 % do next symbol
                 is_list_break = true;
                 break;
             end
+
+            lvl = lvl - 1;
         end
 
         if (is_list_break)
@@ -107,7 +157,7 @@ cur_num = 1;
 
     
         %calculate norm
-        cur_norm = d_i;
+        cur_norm = cur_weights(1);
 
         %check lambda general
         if (cur_norm < lambda_g)
@@ -141,6 +191,9 @@ cur_num = 1;
             max_lambda(layer) = max(lambda_jb( ((Nt - layer + 1) * bits_in_mod + 1) : bits_in_mes ));
         end
 
+        is_full_leaf_was = true;
+        min_lvl_of_weight = 1;
+        last_num = cur_num;
         cur_num = cur_num + 1;
     end
 
@@ -189,3 +242,4 @@ function nums = mAryVectorsToNumbers(A, M)
     powers = M.^((Nt-1):-1:0).';   % [Nt x 1]
     nums = powers.' * A;           % [1 x M^Nt]
 end
+
